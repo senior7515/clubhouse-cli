@@ -2,87 +2,49 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 
-const configDir =
-    process.env.XDG_CONFIG_HOME ||
-    path.resolve(process.env.XDG_DATA_HOME || os.homedir(), '.config', 'clubhouse-cli');
-
-const configFile = path.resolve(configDir, 'config.json');
-const legacyConfigDir = path.resolve(os.homedir(), '.clubhouse-cli');
+//TODO: Move to XDG_CONFIG
+const configFile = path.resolve(os.homedir(), '.clubhouse-cli', 'config.json');
 
 export interface Config {
     mentionName: string;
-    urlSlug: string;
+
+    // Clubhouse workspace
+    // https://help.clubhouse.io/hc/en-us/sections/360000212786-Organizations-and-Workspaces.
+    workspaceName: string;
+
     token: string;
-    // Object used by club workspace.
-    // This is unrelated to the concept of Clubhouse Workspaces.
+
+    // Object used by club workspace. Unrelated to the clubhouse concept of workspace.
     workspaces: { [key: string]: object };
 }
 
-let CONFIG_CACHE = null as Config;
-
-/**
- * Config load function to be used in most-cases.
- */
 export const loadConfig: () => Config = () => {
-    const config = loadCachedConfig();
-    if (!config || config === ({} as Config) || !config.token) {
-        console.error("Please run 'club install' to configure Clubhouse API access.");
-        process.exit(11);
-    }
-
-    if (!config.urlSlug) {
-        console.error(
-            'Your config must be updated with data from Clubhouse. ' +
-                "Please run 'club install --refresh'."
-        );
-        process.exit(12);
-    }
-    return config;
-};
-
-/**
- * Only use this function directly if you need to avoid the config check.
- */
-export const loadCachedConfig: () => Config = () => {
-    if (CONFIG_CACHE) {
-        return { ...CONFIG_CACHE };
-    }
-    let config = {} as Config;
-    const token = process.env.CLUBHOUSE_API_TOKEN;
-    if (fs.existsSync(legacyConfigDir)) {
-        createConfigDir();
-        fs.renameSync(legacyConfigDir, configDir);
-    }
+    const envToken = process.env.CLUBHOUSE_API_TOKEN;
     if (fs.existsSync(configFile)) {
         try {
-            config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+            const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+            if (envToken) {
+                return Object.assign({}, config, { token: envToken });
+            }
+            return config;
         } catch (e) {
             console.error(e);
-            process.exit(10);
+            return {};
         }
     }
-    if (token) {
-        config = { token, ...config };
+    if (envToken) {
+        return { token: envToken };
     }
-    CONFIG_CACHE = { ...config };
-    return config;
+    return {};
 };
 
-const createConfigDir = () => {
-    const dir = path.dirname(configDir);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir);
-    }
-    if (!fs.existsSync(configDir)) {
-        fs.mkdirSync(configDir);
-    }
-};
-
-const saveConfig = (config: Config) => {
+const saveConfig = (opt: any) => {
+    const dir = path.dirname(configFile);
     try {
-        createConfigDir();
-        fs.writeFileSync(configFile, JSON.stringify(config), { flag: 'w' });
-        CONFIG_CACHE = { ...config };
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir);
+        }
+        fs.writeFileSync(configFile, JSON.stringify(opt), { flag: 'w' });
         return true;
     } catch (e) {
         console.error(e);
@@ -90,20 +52,24 @@ const saveConfig = (config: Config) => {
     }
 };
 
-export const updateConfig = (newConfig: Config) => {
-    const extantConfig = loadCachedConfig() || {};
-    return saveConfig({ ...newConfig, ...extantConfig });
+const updateConfig = (opt: any) => {
+    const extant = loadConfig() || {};
+    return saveConfig(Object.assign({}, extant, opt));
 };
 
 const saveWorkspace = (name: string, workspace: any) => {
-    const extantConfig = loadCachedConfig();
-    let workspaces = extantConfig.workspaces || {};
+    const extant = loadConfig();
+    let workspaces = extant.workspaces || {};
     workspaces[name] = workspace;
-    return saveConfig({ workspaces, ...extantConfig });
+    return saveConfig(
+        Object.assign({}, extant, {
+            workspaces,
+        })
+    );
 };
 
 const removeWorkspace = (name: string) => {
-    const extant = loadCachedConfig();
+    const extant = loadConfig();
     delete extant.workspaces[name];
     return saveConfig(Object.assign({}, extant));
 };
